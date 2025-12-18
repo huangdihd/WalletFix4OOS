@@ -86,16 +86,13 @@ if [ -n "$MODEL" ]; then
   for file in $(unzip -l "$ZIPFILE" | awk '{print $4}' | grep "^odms/$MODEL/" | grep -v "/$" | grep -v ".sha256"); do
     extract "$ZIPFILE" "$file" "$MODPATH"
   done
-  # mount as vendor partition for better compatibility
-  mv "$MODPATH/odms/$MODEL/odm" "$MODPATH/system/vendor"
+  mv "$MODPATH/odms/$MODEL/odm" "$MODPATH/system/"
   rm -rf "$MODPATH/odms"
   # extract service.sh only eID fix supported
   extract "$ZIPFILE" 'service.sh'      "$MODPATH"
   # replace eid_hal_server placeholder in service.sh with the real file name
-  REAL_EID_HAL_SERVER_FILENAME=$(basename "$(find "$MODPATH/system/vendor/bin" -name "*eid*" -type f | head -n 1)")
+  REAL_EID_HAL_SERVER_FILENAME=$(basename "$(find "$MODPATH/system/odm/bin" -name "*eid*" -type f | head -n 1)")
   sed -i "s|eid_hal_server|$REAL_EID_HAL_SERVER_FILENAME|g" "$MODPATH/service.sh"
-  # replace odm in $MODPATH/system/vendor/etc files with vendor
-  sed -i "s|/odm/|/vendor/|g" $(find "$MODPATH/system/vendor/etc" -type f)
   ui_print "- eID files for $MODEL extracted!"
 else
   ui_print "- eID fix not supported on this model yet!"
@@ -129,10 +126,10 @@ fi
 
 ui_print "- Setting permissions"
 set_perm_recursive "$MODPATH/system/product" 0 0 0755 0644
-if [ -d "$MODPATH/system/vendor" ]; then
-  set_perm_recursive "$MODPATH/system/vendor" 0 2000 0755 0644 u:object_r:vendor_file:s0
-  set_perm_recursive "$MODPATH/system/vendor/bin" 0 2000 0751 0755 u:object_r:vendor_file:s0
-  set_perm "$MODPATH/system/vendor/bin/hw/$REAL_EID_HAL_SERVER_FILENAME" 0 2000 0755 u:object_r:hal_eid_oplus_exec:s0
-  set_perm_recursive "$MODPATH/system/vendor/etc" 0 2000 0755 0644 u:object_r:vendor_configs_file:s0
+if [ -d "$MODPATH/system/odm" ]; then
+  set_perm_recursive "$MODPATH/system/odm" 0 0 0755 0644 u:object_r:vendor_file:s0
+  set_perm_recursive "$MODPATH/system/odm/bin" 0 0 0755 0755 u:object_r:vendor_file:s0
+  set_perm "$MODPATH/system/odm/bin/hw/$REAL_EID_HAL_SERVER_FILENAME" 0 2000 0755 u:object_r:hal_eid_oplus_exec:s0
+  set_perm_recursive "$MODPATH/system/odm/etc" 0 0 0755 0644 u:object_r:vendor_configs_file:s0
 fi
-ls -laRZ "$MODPATH/system/vendor"
+ls -laRZ "$MODPATH/system/odm"
