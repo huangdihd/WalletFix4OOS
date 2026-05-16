@@ -22,16 +22,27 @@ jobs:
           fetch-depth: 0
 
       - name: Checkout target tag
-        run: git checkout $(git describe --tags --abbrev=0)
+        run: |
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            git checkout $(git describe --tags --abbrev=0)
+          else
+            echo "No tags found, staying on current branch"
+          fi
 
       - name: Set Version
         id: set_version
         run: |
-          git describe --tags --abbrev=0
-          git rev-list HEAD --count
-          echo "version=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
-          echo "versionCode=$((1000 + $(git rev-list HEAD --count)))" >> $GITHUB_OUTPUT
+          if git describe --tags --abbrev=0 >/dev/null 2>&1; then
+            VERSION=$(git describe --tags --abbrev=0)
+          else
+            echo "No tags found, attempting to get version from update.json"
+            VERSION=$(python -c "import json; print(json.load(open('update.json'))['version'])" || echo "1.0.0")
+          fi
 
+          COUNT=$(git rev-list HEAD --count)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "versionCode=$((1000 + $COUNT))" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION, versionCode: $((1000 + $COUNT))"
   build:
     needs: setup
     uses: ./.github/workflows/build.yml
