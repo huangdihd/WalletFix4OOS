@@ -78,7 +78,7 @@ jobs:
             i=1
             for url in ${{ steps.fetch_url.outputs.ota_url }}; do
               echo "Downloading part $i..."
-              wget -O "part_$i" "$url"
+              wget --progress=dot:giga -O "part_$i" "$url"
               
               # Check if the file is too small (e.g. less than 1MB)
               FILE_SIZE=$(stat -c%s "part_$i")
