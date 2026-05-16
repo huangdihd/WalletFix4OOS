@@ -26,6 +26,7 @@ jobs:
         with:
           submodules: "recursive"
           fetch-depth: 0
+          lfs: true
 
       - name: Checkout to target branch (tag)
         if: inputs.ref
@@ -61,6 +62,8 @@ jobs:
           git fetch origin odm:odm
           git checkout apk -- product
           git checkout odm -- odms
+          # Ensure LFS files are downloaded instead of just pointers
+          git lfs pull
           mkdir -p module/template/system
           mv product module/template/system/
           mv odms module/template/
