@@ -199,22 +199,31 @@ jobs:
           rm -f super.img
           rm -f download_list.txt
 
-      - name: Zip APKS
+      - name: Commit changes
         run: |
-          zip -r firmware_apks.zip product/
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Initialize Git LFS
+          git lfs install
+          
+          # Track APK files with LFS
+          git lfs track "*.apk"
+          git add .gitattributes
 
-      - name: Upload APKS Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: extracted-apks
-          path: firmware_apks.zip
-
-      - name: Create or Update Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: apks-extracted
-          name: "Extracted APKS Storage"
-          body: "This release contains the latest extracted APKs from the firmware update. Updated on ${{ github.event.inputs.msg }}"
-          files: firmware_apks.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only add the product directory to the apk branch
+          if [ -d product ]; then
+            git add product
+          else
+            echo "Error: product directory not found!"
+            exit 1
+          fi
+          
+          # Check if there's anything to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "${{ github.event.inputs.msg }}"
+            echo "Pushing changes to origin apk branch with Git LFS..."
+            git push -f origin apk
+          fi
