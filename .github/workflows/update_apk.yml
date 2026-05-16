@@ -186,9 +186,6 @@ jobs:
           # unmount images safely
           sudo umount -l mnt/my_stock || true
           sudo umount -l mnt/my_heytap || true
-
-          # Remove optimized files to save space (vdex, odex are not needed for the module)
-          find product -type d -name "oat" -exec rm -rf {} + || true
     
       - name: Cleanup
         run: |
