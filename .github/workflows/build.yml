@@ -26,7 +26,6 @@ jobs:
         with:
           submodules: "recursive"
           fetch-depth: 0
-          lfs: true
 
       - name: Checkout to target branch (tag)
         if: inputs.ref
@@ -87,6 +86,15 @@ jobs:
       - name: Upload release
         uses: actions/upload-artifact@v4
         with:
+          name: ${{ steps.prepareArtifact.outputs.releaseName }}
+          path: "./module-release/*"
+
+      - name: Upload debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prepareArtifact.outputs.debugName }}
+          path: "./module-debug/*"
+
           name: ${{ steps.prepareArtifact.outputs.releaseName }}
           path: "./module-release/*"
 
