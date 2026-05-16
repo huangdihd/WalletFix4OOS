@@ -51,8 +51,10 @@ jobs:
       - name: Setup
         id: setup
         run: |
+          # Extract a stable filename even with encoded characters and query params
           FIRST_URL=$(echo "${{ steps.fetch_url.outputs.ota_url }}" | awk '{print $1}')
-          echo "FILENAME=$(basename "$FIRST_URL" | cut -d'?' -f1)" >> $GITHUB_OUTPUT
+          CLEAN_NAME=$(echo "$FIRST_URL" | sed 's|.*/||; s|/download$||; s|?.*||')
+          echo "FILENAME=$CLEAN_NAME" >> $GITHUB_OUTPUT
 
       - name: Download prebuild fuse.erofs
         run: |
@@ -72,27 +74,18 @@ jobs:
           if [ ! -f output/odm.img ]; then
             echo "URLs to download: ${{ steps.fetch_url.outputs.ota_url }}"
             
-            # Create a download list for aria2
-            rm -f download_list.txt
+            rm -f firmware.zip
             i=1
             for url in ${{ steps.fetch_url.outputs.ota_url }}; do
-              echo "$url" >> download_list.txt
-              echo "  out=part_$i" >> download_list.txt
+              echo "Downloading part $i..."
+              curl -L -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+                   -o "part_$i" "$url"
               i=$((i+1))
             done
             
-            echo "Downloading with aria2 (multi-threaded)..."
-            aria2c -i download_list.txt -x 16 -s 16 -j 5 --summary-interval=5
-            
             echo "Joining parts..."
-            # Get count of parts
-            part_count=$(grep -c "^http" download_list.txt)
-            rm -f firmware.zip
-            for j in $(seq 1 $part_count); do
-              cat "part_$j" >> firmware.zip
-              rm "part_$j"
-            done
-            rm download_list.txt
+            cat part_* > firmware.zip
+            rm part_*
 
             echo "Extracting super.img..."
             unzip -j firmware.zip "*super.img" -d ./ || echo "Could not extract super.img directly"
