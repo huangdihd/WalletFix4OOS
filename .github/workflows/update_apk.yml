@@ -4,8 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'URL of the full OTA update package.'
-        required: true
+        description: 'URL of the full OTA update package (Optional if model/version are provided).'
+        required: false
+      model:
+        description: 'Device model (e.g. PJD110)'
+        required: false
+      version:
+        description: 'Current OTA version (e.g. PJD110_14.0.0.840(CN01))'
+        required: false
+      region:
+        description: 'Region (CN, GL, IN, EU)'
+        required: false
+        default: 'CN'
       msg:
         description: 'Message for the commit.'
         required: true
@@ -18,10 +28,8 @@ jobs:
     name: Update apks
     runs-on: ubuntu-latest
     steps:
-      - name: Setup
-        id: setup
-        run: |
-          echo FILENAME=$(basename "${{ github.event.inputs.url }}" | cut -d'?' -f1) >> $GITHUB_OUTPUT
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,16 +38,30 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install git+https://github.com/geniucker-org/payload-dumper
+          pip install git+https://github.com/geniucker-org/payload-dumper pycryptodome requests
+
+      - name: Fetch OTA URL
+        id: fetch_url
+        run: |
+          if [ -n "${{ github.event.inputs.url }}" ]; then
+            echo "ota_url=${{ github.event.inputs.url }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.event.inputs.model }}" ] && [ -n "${{ github.event.inputs.version }}" ]; then
+            python oplus_ota_finder.py -m "${{ github.event.inputs.model }}" -v "${{ github.event.inputs.version }}" -r "${{ github.event.inputs.region }}" --url-only
+          else
+            echo "Error: Must provide either url OR (model and version)"
+            exit 1
+          fi
+
+      - name: Setup
+        id: setup
+        run: |
+          echo "FILENAME=$(basename "${{ steps.fetch_url.outputs.ota_url }}" | cut -d'?' -f1)" >> $GITHUB_OUTPUT
 
       - name: Download prebuild fuse.erofs
         run: |
           wget -O /tmp/erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.10-251024/erofs-utils-v1.8.10-g878e67d4-251024-Linux_x86_64.zip
           unzip /tmp/erofs-utils.zip -d /tmp/erofs-utils
           chmod -R +x /tmp/erofs-utils
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Restore cached my_stock.img
         id: restore_cache_my_stock
@@ -58,10 +80,10 @@ jobs:
       - name: Download my_stock and my_heytap partition from the OTA update
         run: |
           if [ ! -f output/my_stock.img ]; then
-            python -m payload_dumper --partitions my_stock "${{ github.event.inputs.url }}"
+            python -m payload_dumper --partitions my_stock "${{ steps.fetch_url.outputs.ota_url }}"
           fi
           if [ ! -f output/my_heytap.img ]; then
-            python -m payload_dumper --partitions my_heytap "${{ github.event.inputs.url }}"
+            python -m payload_dumper --partitions my_heytap "${{ steps.fetch_url.outputs.ota_url }}"
           fi
 
       - name: Save cache my_stock.img
