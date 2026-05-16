@@ -89,23 +89,26 @@ jobs:
         run: |
           version="${{ needs.setup.outputs.version }}"
           versionCode="${{ needs.setup.outputs.versionCode }}"
-          zipUrl="https://github.com/geniucker-dev/WalletFix4OOS/releases/download/${version}/${{ steps.zip.outputs.release }}"
+          repo="${{ github.repository }}"
+          zipUrl="https://github.com/${repo}/releases/download/${version}/${{ steps.zip.outputs.release }}"
           echo '{
             "version": "'${version}'",
             "versionCode": '${versionCode}',
             "zipUrl": "'${zipUrl}'",
-            "changelog": "https://raw.githubusercontent.com/geniucker-dev/WalletFix4OOS/main/changelog.md"
+            "changelog": "https://raw.githubusercontent.com/${repo}/main/changelog.md"
           }' > update.json
 
-          # update build.gradle.kts
-          version="${{ needs.setup.outputs.version }}"
+          # update build.gradle.kts verName
           echo "Updating build.gradle.kts verName to ${version}"
-          # Replace the line that defines verName; do not commit here
-          sed -E -i "s/val verName by extra\\(\"[^\"]*\"\\)/val verName by extra(\"${version}\")/" build.gradle.kts
+          sed -E -i "s/val verName by extra\(\"[^\"]*\"\)/val verName by extra(\"${version}\")/" build.gradle.kts
 
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add update.json
-          git add build.gradle.kts
-          git commit -m "Update update.json and build.gradle.kts"
-          git push
+          git add update.json build.gradle.kts
+          
+          if git diff --staged --quiet; then
+            echo "No changes to update.json or build.gradle.kts"
+          else
+            git commit -m "Update update.json and build.gradle.kts to ${version}"
+            git push
+          fi
