@@ -186,6 +186,9 @@ jobs:
           # unmount images safely
           sudo umount -l mnt/my_stock || true
           sudo umount -l mnt/my_heytap || true
+
+          # Remove optimized files to save space (vdex, odex are not needed for the module)
+          find product -type d -name "oat" -exec rm -rf {} + || true
     
       - name: Cleanup
         run: |
@@ -200,6 +203,7 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config http.postBuffer 524288000
 
           # Only add the product directory to the apk branch
           if [ -d product ]; then
