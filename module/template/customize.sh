@@ -2,6 +2,7 @@
 
 REPLACE="
 /system/product/priv-app/KeKeUserCenter
+/system/product/priv-app/OppoGallery2
 "
 
 SKIPUNZIP=1

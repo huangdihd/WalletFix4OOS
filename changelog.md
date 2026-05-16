@@ -1,5 +1,10 @@
 ## WalletFix4OOS 更新日志
 
+### 2.3.1
+
+feature:
+- Add `OppoGallery2` overlay
+
 ### 2.3.0
 
 feature:
