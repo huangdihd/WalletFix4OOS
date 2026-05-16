@@ -201,16 +201,19 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Surgical add: only add the product directory and necessary scripts
-          git add product
-          git add sf_finder.py
+          # Only add the product directory to the apk branch
+          if [ -d product ]; then
+            git add product
+          else
+            echo "Error: product directory not found!"
+            exit 1
+          fi
           
           # Check if there's anything to commit
           if git diff --staged --quiet; then
             echo "No changes to commit"
-            exit 0
+          else
+            git commit -m "${{ github.event.inputs.msg }}"
+            echo "Pushing changes to origin apk branch..."
+            git push -f origin apk
           fi
-
-          git commit -m "${{ github.event.inputs.msg }}"
-          echo "Pushing changes to origin apk branch..."
-          git push -f origin apk
