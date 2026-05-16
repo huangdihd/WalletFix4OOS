@@ -4,18 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'URL of the full OTA update package (Optional if model/version are provided).'
+        description: 'Direct URL of the full OTA update package (Optional if sf_folder is provided).'
         required: false
-      model:
-        description: 'Device model (e.g. PJD110)'
+      sf_folder:
+        description: 'SourceForge folder prefix (e.g. "Oneplus 13/OxygenOS Flashers")'
         required: false
-      version:
-        description: 'Current OTA version (e.g. PJD110_14.0.0.840(CN01))'
-        required: false
-      region:
-        description: 'Region (CN, GL, IN, EU)'
-        required: false
-        default: 'CN'
       msg:
         description: 'Message for the commit.'
         required: true
@@ -38,29 +31,33 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install git+https://github.com/geniucker-org/payload-dumper pycryptodome requests
+          sudo apt-get update
+          sudo apt-get install -y unzip curl aria2
+          # We need lpunpack.py to extract super.img
+          wget https://raw.githubusercontent.com/unix3dgforce/lpunpack/master/lpunpack.py -O /tmp/lpunpack.py
 
       - name: Fetch OTA URL
         id: fetch_url
         run: |
           if [ -n "${{ github.event.inputs.url }}" ]; then
             echo "ota_url=${{ github.event.inputs.url }}" >> $GITHUB_OUTPUT
-          elif [ -n "${{ github.event.inputs.model }}" ] && [ -n "${{ github.event.inputs.version }}" ]; then
-            python oplus_ota_finder.py -m "${{ github.event.inputs.model }}" -v "${{ github.event.inputs.version }}" -r "${{ github.event.inputs.region }}" --url-only
+          elif [ -n "${{ github.event.inputs.sf_folder }}" ]; then
+            python sf_finder.py -p oneplus13flashers -f "${{ github.event.inputs.sf_folder }}" --url-only
           else
-            echo "Error: Must provide either url OR (model and version)"
+            echo "Error: Must provide either url OR sf_folder"
             exit 1
           fi
 
       - name: Setup
         id: setup
         run: |
-          echo "FILENAME=$(basename "${{ steps.fetch_url.outputs.ota_url }}" | cut -d'?' -f1)" >> $GITHUB_OUTPUT
+          FIRST_URL=$(echo "${{ steps.fetch_url.outputs.ota_url }}" | awk '{print $1}')
+          echo "FILENAME=$(basename "$FIRST_URL" | cut -d'?' -f1)" >> $GITHUB_OUTPUT
 
       - name: Download prebuild fuse.erofs
         run: |
           wget -O /tmp/erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.10-251024/erofs-utils-v1.8.10-g878e67d4-251024-Linux_x86_64.zip
-          unzip /tmp/erofs-utils.zip -d /tmp/erofs-utils
+          unzip -o /tmp/erofs-utils.zip -d /tmp/erofs-utils
           chmod -R +x /tmp/erofs-utils
 
       - name: Restore cached my_stock.img
@@ -77,13 +74,54 @@ jobs:
           path: output/my_heytap.img
           key: ${{ steps.setup.outputs.FILENAME }}-my_heytap
 
-      - name: Download my_stock and my_heytap partition from the OTA update
+      - name: Download and Extract super.img
         run: |
-          if [ ! -f output/my_stock.img ]; then
-            python -m payload_dumper --partitions my_stock "${{ steps.fetch_url.outputs.ota_url }}"
-          fi
-          if [ ! -f output/my_heytap.img ]; then
-            python -m payload_dumper --partitions my_heytap "${{ steps.fetch_url.outputs.ota_url }}"
+          if [ ! -f output/my_stock.img ] || [ ! -f output/my_heytap.img ]; then
+            echo "URLs to download: ${{ steps.fetch_url.outputs.ota_url }}"
+            
+            # Create a download list for aria2
+            rm -f download_list.txt
+            i=1
+            for url in ${{ steps.fetch_url.outputs.ota_url }}; do
+              echo "$url" >> download_list.txt
+              echo "  out=part_$i" >> download_list.txt
+              i=$((i+1))
+            done
+            
+            echo "Downloading with aria2 (multi-threaded)..."
+            aria2c -i download_list.txt -x 16 -s 16 -j 5 --summary-interval=5
+            
+            echo "Joining parts..."
+            # Get count of parts
+            part_count=$(grep -c "^http" download_list.txt)
+            rm -f firmware.zip
+            for j in $(seq 1 $part_count); do
+              cat "part_$j" >> firmware.zip
+              rm "part_$j"
+            done
+            rm download_list.txt
+
+            echo "Extracting super.img..."
+            unzip -j firmware.zip "*super.img" -d ./ || echo "Could not extract super.img directly"
+            
+            if [ ! -f super.img ]; then
+                echo "super.img not found! Looking inside firmware.zip..."
+                unzip -l firmware.zip
+                exit 1
+            fi
+
+            mkdir -p output
+            echo "Extracting partitions from super.img..."
+            python /tmp/lpunpack.py -p my_stock_a super.img output/ || python /tmp/lpunpack.py -p my_stock_b super.img output/ || python /tmp/lpunpack.py -p my_stock super.img output/ || echo "Failed to extract my_stock"
+            python /tmp/lpunpack.py -p my_heytap_a super.img output/ || python /tmp/lpunpack.py -p my_heytap_b super.img output/ || python /tmp/lpunpack.py -p my_heytap super.img output/ || echo "Failed to extract my_heytap"
+            
+            # Rename for consistency if they have _a or _b suffixes
+            [ -f output/my_stock_a.img ] && mv output/my_stock_a.img output/my_stock.img
+            [ -f output/my_stock_b.img ] && mv output/my_stock_b.img output/my_stock.img
+            [ -f output/my_heytap_a.img ] && mv output/my_heytap_a.img output/my_heytap.img
+            [ -f output/my_heytap_b.img ] && mv output/my_heytap_b.img output/my_heytap.img
+
+            rm firmware.zip super.img
           fi
 
       - name: Save cache my_stock.img
@@ -113,25 +151,7 @@ jobs:
           /tmp/erofs-utils/fuse.erofs output/my_stock.img mnt/my_stock
           /tmp/erofs-utils/fuse.erofs output/my_heytap.img mnt/my_heytap
 
-          # list folders in my_stock/priv-app
-          echo "List of folders in my_stock/priv-app"
-          ls -lh mnt/my_stock/priv-app
-          echo
-          # list folders in heytap/priv-app
-          echo "List of folders in my_heytap/priv-app"
-          ls -lh mnt/my_heytap/priv-app
-          echo
-          # list folders in my_stock/app
-          echo "List of folders in my_stock/app"
-          ls -lh mnt/my_stock/app
-          echo
-          # list folders in my_heytap/app
-          echo "List of folders in my_heytap/app"
-          ls -lh mnt/my_heytap/app
-          echo
-
           # update files
-
           mkdir -p product/priv-app
           cp -r mnt/my_stock/priv-app/KeKeUserCenter product/priv-app/
           cp -r mnt/my_stock/priv-app/KeKeUserCenterAccount product/priv-app/
@@ -163,21 +183,34 @@ jobs:
             exit 1
           fi
           
-          # unmount images
-          umount mnt/my_stock
-          umount mnt/my_heytap
+          # unmount images safely
+          sudo umount -l mnt/my_stock || true
+          sudo umount -l mnt/my_heytap || true
     
       - name: Cleanup
         run: |
           rm -rf mnt
           rm -rf output
+          rm -f firmware.zip
+          rm -f part_*
+          rm -f super.img
+          rm -f download_list.txt
 
       - name: Commit changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # clear hystory
-          git add -A
+          # Surgical add: only add the product directory and necessary scripts
+          git add product
+          git add sf_finder.py
+          
+          # Check if there's anything to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
           git commit -m "${{ github.event.inputs.msg }}"
+          echo "Pushing changes to origin apk branch..."
           git push -f origin apk
