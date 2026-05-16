@@ -4,8 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'URL of the full OTA update package.'
-        required: true
+        description: 'Direct URL of the full OTA update package (Optional if sf_folder is provided).'
+        required: false
+      sf_folder:
+        description: 'SourceForge folder prefix (e.g. "Oneplus 13/OxygenOS Flashers")'
+        required: false
       msg:
         description: 'Message for the commit.'
         required: true
@@ -18,10 +21,8 @@ jobs:
     name: Update eID HAL files
     runs-on: ubuntu-latest
     steps:
-      - name: Setup
-        id: setup
-        run: |
-          echo FILENAME=$(basename "${{ github.event.inputs.url }}" | cut -d'?' -f1) >> $GITHUB_OUTPUT
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -30,16 +31,34 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install git+https://github.com/geniucker-org/payload-dumper
+          sudo apt-get update
+          sudo apt-get install -y unzip curl aria2
+          # We need lpunpack.py to extract super.img
+          wget https://raw.githubusercontent.com/unix3dgforce/lpunpack/master/lpunpack.py -O /tmp/lpunpack.py
+
+      - name: Fetch OTA URL
+        id: fetch_url
+        run: |
+          if [ -n "${{ github.event.inputs.url }}" ]; then
+            echo "ota_url=${{ github.event.inputs.url }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.event.inputs.sf_folder }}" ]; then
+            python sf_finder.py -p oneplus13flashers -f "${{ github.event.inputs.sf_folder }}" --url-only
+          else
+            echo "Error: Must provide either url OR sf_folder"
+            exit 1
+          fi
+
+      - name: Setup
+        id: setup
+        run: |
+          FIRST_URL=$(echo "${{ steps.fetch_url.outputs.ota_url }}" | awk '{print $1}')
+          echo "FILENAME=$(basename "$FIRST_URL" | cut -d'?' -f1)" >> $GITHUB_OUTPUT
 
       - name: Download prebuild fuse.erofs
         run: |
           wget -O /tmp/erofs-utils.zip https://github.com/sekaiacg/erofs-utils/releases/download/v1.8.10-251024/erofs-utils-v1.8.10-g878e67d4-251024-Linux_x86_64.zip
-          unzip /tmp/erofs-utils.zip -d /tmp/erofs-utils
+          unzip -o /tmp/erofs-utils.zip -d /tmp/erofs-utils
           chmod -R +x /tmp/erofs-utils
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Restore cached odm.img
         id: restore_cache_odm
@@ -47,11 +66,52 @@ jobs:
         with:
           path: output/odm.img
           key: ${{ steps.setup.outputs.FILENAME }}-odm
-      
-      - name: Download odm partition from the OTA update
+
+      - name: Download and Extract super.img
         run: |
           if [ ! -f output/odm.img ]; then
-            python -m payload_dumper --partitions odm "${{ github.event.inputs.url }}"
+            echo "URLs to download: ${{ steps.fetch_url.outputs.ota_url }}"
+            
+            # Create a download list for aria2
+            rm -f download_list.txt
+            i=1
+            for url in ${{ steps.fetch_url.outputs.ota_url }}; do
+              echo "$url" >> download_list.txt
+              echo "  out=part_$i" >> download_list.txt
+              i=$((i+1))
+            done
+            
+            echo "Downloading with aria2 (multi-threaded)..."
+            aria2c -i download_list.txt -x 16 -s 16 -j 5 --summary-interval=5
+            
+            echo "Joining parts..."
+            # Get count of parts
+            part_count=$(grep -c "^http" download_list.txt)
+            rm -f firmware.zip
+            for j in $(seq 1 $part_count); do
+              cat "part_$j" >> firmware.zip
+              rm "part_$j"
+            done
+            rm download_list.txt
+
+            echo "Extracting super.img..."
+            unzip -j firmware.zip "*super.img" -d ./ || echo "Could not extract super.img directly"
+            
+            if [ ! -f super.img ]; then
+                echo "super.img not found! Looking inside firmware.zip..."
+                unzip -l firmware.zip
+                exit 1
+            fi
+
+            mkdir -p output
+            echo "Extracting odm partition from super.img..."
+            python /tmp/lpunpack.py -p odm_a super.img output/ || python /tmp/lpunpack.py -p odm_b super.img output/ || python /tmp/lpunpack.py -p odm super.img output/ || echo "Failed to extract odm"
+            
+            # Rename for consistency
+            [ -f output/odm_a.img ] && mv output/odm_a.img output/odm.img
+            [ -f output/odm_b.img ] && mv output/odm_b.img output/odm.img
+
+            rm firmware.zip super.img
           fi
 
       - name: Save cache odm.img
@@ -106,20 +166,39 @@ jobs:
 
           EOF
 
-          # unmount images
-          sudo umount mnt
+          # unmount images safely
+          sudo umount -l mnt || true
+
+          # Remove large files if any accidentally copied
+          find odms -name "*.img" -delete || true
     
       - name: Cleanup
         run: |
           rm -rf mnt
           rm -rf output
+          rm -f firmware.zip
+          rm -f part_*
+          rm -f super.img
+          rm -f download_list.txt
 
       - name: Commit changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          # clear hystory
-          git add -A
-          git commit -m "${{ github.event.inputs.msg }}"
-          git push -f origin HEAD:odm
+          # Split large files in odms if they exist (though shouldn't for EID files)
+          find odms -size +90M -exec echo "Splitting large file: {}" \; -exec split -b 90M {} "{}.part_" \; -exec rm {} \;
+
+          if [ -d odms ]; then
+            git add odms
+          else
+            echo "No odms directory found"
+            exit 1
+          fi
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "${{ github.event.inputs.msg }}"
+            git push -f origin HEAD:odm
+          fi
