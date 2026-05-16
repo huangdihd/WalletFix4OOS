@@ -30,7 +30,12 @@ jobs:
       - name: Checkout to target branch (tag)
         if: inputs.ref
         run: |
-          git checkout ${{ inputs.ref }}
+          if git rev-parse "${{ inputs.ref }}" >/dev/null 2>&1; then
+            echo "Checking out to ${{ inputs.ref }}..."
+            git checkout ${{ inputs.ref }}
+          else
+            echo "Ref ${{ inputs.ref }} not found as a tag or branch. Staying on current branch."
+          fi
 
           # update build.gradle.kts
           version="${{ inputs.ref }}"
