@@ -204,12 +204,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Initialize Git LFS
-          git lfs install
-          
-          # Track APK files with LFS
-          git lfs track "*.apk"
-          git add .gitattributes
+          # Find and split APKs larger than 90MB to bypass GitHub's 100MB limit
+          # This avoids LFS permission issues on forks
+          find product -name "*.apk" -size +90M -exec echo "Splitting large APK: {}" \; -exec split -b 90M {} "{}.part_" \; -exec rm {} \;
 
           # Only add the product directory to the apk branch
           if [ -d product ]; then
@@ -224,6 +221,6 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "${{ github.event.inputs.msg }}"
-            echo "Pushing changes to origin apk branch with Git LFS..."
+            echo "Pushing changes to origin apk branch..."
             git push -f origin apk
           fi
