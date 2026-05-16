@@ -59,7 +59,26 @@ def find_latest_sf_files(project, folder_prefix=""):
     # Sort parts by title (so .001 comes before .002)
     parts.sort(key=lambda x: x['title'])
     
-    return [p['link'] for p in parts]
+    # Convert to direct download links
+    # From: https://sourceforge.net/projects/PROJECT/files/PATH/download
+    # To:   https://downloads.sourceforge.net/project/PROJECT/PATH
+    direct_links = []
+    for p in parts:
+        link = p['link']
+        if '/projects/' in link and '/files/' in link:
+            parts_of_url = link.split('/')
+            # index of 'projects' is usually 3, 'files' is 5
+            project_name = parts_of_url[4]
+            # join everything between 'files' and 'download'
+            file_path_index = link.find('/files/') + 7
+            download_index = link.rfind('/download')
+            file_path = link[file_path_index:download_index]
+            direct_link = f"https://downloads.sourceforge.net/project/{project_name}/{file_path}"
+            direct_links.append(direct_link)
+        else:
+            direct_links.append(link)
+            
+    return direct_links
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Find latest zip file(s) on SourceForge")

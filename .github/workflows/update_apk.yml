@@ -85,8 +85,16 @@ jobs:
             i=1
             for url in ${{ steps.fetch_url.outputs.ota_url }}; do
               echo "Downloading part $i..."
-              curl -L -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-                   -o "part_$i" "$url"
+              wget --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+                   -O "part_$i" "$url"
+              
+              # Check if the file is too small (e.g. less than 1MB), which usually means it's an error page
+              FILE_SIZE=$(stat -c%s "part_$i")
+              if [ "$FILE_SIZE" -lt 1048576 ]; then
+                echo "Error: Downloaded file part_$i is too small ($FILE_SIZE bytes). It might be an error page."
+                cat "part_$i"
+                exit 1
+              fi
               i=$((i+1))
             done
             
